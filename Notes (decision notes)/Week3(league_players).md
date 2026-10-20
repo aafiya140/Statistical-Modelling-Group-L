@@ -11,14 +11,18 @@ Dispersion parameter is 1: there is no overdispersion, the model fits the varian
 
 **The coefficients:**
 This is binomial so we are looking at log odds, and we will exponentiate them to get odds ratio.
+
 Age: Estimate = 0.109
 -	This means for every 1 year older a player is, the log-odds of injury increase by 0.109
 -	Odds ratio e^0.109≈1.115. For every extra year of age, the odds of being injured increases by approx. 11.5%. This is highly significant as p<0.001
 -	95% CI : [1.05, 1.18]
+
+  
 Previous injuries: Estimate = 0.522
 -	This means for every additional previous injury, the log odds increase by 0.522
 -	Odds ratio e^0.522≈1.685. for every extra previous injury, the odds of being injured increase by 68.5%. This is highly significant (p<0.001)
 -	95% CI : [ 1.41, 2.02]
+
 BMI : Estimate = -0.057
 -	Gets an odds ratio of 0.94. However, this is not statistically significant (p = 0.417). The data does not provide sufficient evidence to conclude that BMI is associated with injury risk one age and previous history are controlled for.
 -	95% CI: [0.82, 1.08], we cannot be sure if BMI decreases risk (0.82), has no effect (1.0), or slightly increases risk (1.08)
