@@ -1,0 +1,153 @@
+# Week 3: Introduction to Generalised Linear Models
+# Odds ratios, Wald tests, deviance and likelihood ratio tests
+# Exploratory analysis: not the final Week 4 model-selection decision.
+
+
+# 1. Load the datasets
+# Run from the shared project's root folder in RStudio.
+# Data may be stored either at the project root or in a data/ subfolder.
+# Do not use an absolute setwd() path specific to one group member.
+
+find_data_file <- function(filename) {
+  candidates <- c(file.path("data", filename), filename)
+  available <- candidates[file.exists(candidates)]
+  if (length(available) == 0L) {
+    stop(paste("Could not find", filename,
+               "in the project root or data/ folder."), call. = FALSE)
+  }
+  available[1L]
+}
+
+ashford_matches <- read.csv(find_data_file("ashford_matches.csv"))
+league_players <- read.csv(find_data_file("league_players.csv"))
+
+head(ashford_matches)
+head(league_players)
+
+
+# 2. Explore the datasets
+
+str(league_players)
+summary(league_players)
+
+str(ashford_matches)
+summary(ashford_matches)
+
+
+# 3. Identify variable types
+
+# League players:
+# team: categorical (club)
+# position: categorical (GK, DEF, MID, FWD)
+# age: numerical age recorded in whole years
+# minutes_played: numerical (playing time)
+# training_load: ordinal score (1-5)
+# prev_injuries: count of injuries in the prior three seasons
+# bmi: numerical/continuous measurement
+# injured: binary (0 = not injured, 1 = injured)
+
+# Ashford matches:
+# home_away: categorical (Home, Away)
+# goals_scored: count
+# goals_conceded: count
+# opponent_rank: ordered numerical league rank
+
+# A binomial GLM with a logit link is appropriate for the binary injured
+# response. A Poisson GLM with a log link is a possible starting point for
+# goals_scored, but its fit and dispersion must be checked before use.
+
+
+# 4. Examine the injury outcome
+
+table(league_players$injured)
+prop.table(table(league_players$injured))
+
+# Examine categorical predictors and home/away matches.
+table(league_players$position)
+table(league_players$team)
+table(ashford_matches$home_away)
+
+# Confirm the encoding required by a Bernoulli/binomial response.
+stopifnot(!anyNA(league_players$injured),
+          all(league_players$injured %in% c(0, 1)))
+
+
+# 5. Fit a simple logistic regression model
+# Response: injured
+# Explanatory variable: age
+# H0: beta_age = 0; H1: beta_age != 0
+
+glm_league_week3 <- glm(injured ~ age,
+                        family = binomial(link = "logit"),
+                        data = league_players)
+
+summary(glm_league_week3)
+
+
+# 6. Calculate the odds ratio for age
+# exp(beta_age) is the multiplicative change in odds for one extra year.
+# Odds and probabilities are not the same quantity.
+
+odds_ratio_age <- exp(coef(glm_league_week3)["age"])
+odds_ratio_age
+
+# Profile-likelihood 95% confidence interval (on the odds-ratio scale).
+exp(confint(glm_league_week3)["age", ])
+
+
+# 7. Wald test for age
+# summary() reports the estimated coefficient, SE, z-statistic and p-value.
+
+summary(glm_league_week3)$coefficients["age", ]
+
+
+# 8. Fit the intercept-only model
+
+glm_league_null <- glm(injured ~ 1,
+                       family = binomial(link = "logit"),
+                       data = league_players)
+
+# Compare null and residual deviance.
+glm_league_null$deviance
+glm_league_week3$deviance
+
+# Improvement from adding age (one degree of freedom).
+glm_league_null$deviance - glm_league_week3$deviance
+
+
+# 9. Likelihood ratio test (LRT)
+# Test the age-only model against the intercept-only model.
+
+anova(glm_league_null,
+      glm_league_week3,
+      test = "Chisq")
+
+
+# 10. Explore a multiple-predictor model
+# This is exploratory and is revisited during Week 4 model selection.
+# The adjusted effect of a variable is interpreted holding the other
+# variables in the formula fixed.
+
+glm_league_week3_multiple <- glm(
+  injured ~ age + prev_injuries + bmi,
+  family = binomial(link = "logit"),
+  data = league_players
+)
+
+summary(glm_league_week3_multiple)
+
+# Adjusted odds ratios and profile-likelihood 95% confidence intervals.
+exp(coef(glm_league_week3_multiple))
+exp(confint(glm_league_week3_multiple))
+
+# Wald tests for individual coefficients.
+summary(glm_league_week3_multiple)$coefficients
+
+# LRT for the full exploratory model versus the intercept-only model.
+anova(glm_league_null,
+      glm_league_week3_multiple,
+      test = "Chisq")
+
+# Each drop1() test compares the three-predictor model to the model
+# with the named predictor removed, holding the others in place.
+drop1(glm_league_week3_multiple, test = "Chisq")
