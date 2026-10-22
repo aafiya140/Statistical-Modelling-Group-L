@@ -1,0 +1,38 @@
+WEEK 3 - INDEPENDENT NUMERICAL VERIFICATION
+Calculated on the supplied CSV using Python statsmodels GLM, binomial family, logit link.
+The R executable is unavailable in this environment. Results have NOT been copied from an R console.
+Profile likelihood confidence intervals are obtained via likelihood-ratio inversion.
+
+Players: 620; injured: 115; not injured: 505; injury proportion: 0.185484
+Matches: 46; home: 23; away: 23
+Position: {'DEF': 216, 'MID': 206, 'FWD': 136, 'GK': 62}
+
+NULL MODEL: null deviance 594.713750; residual deviance 594.713750; df_resid 619; AIC 596.713750
+     Estimate  Std.Error      z.value    p.value  odds.ratio
+0 -1.47962630 0.10332400 -14.32025776 0.00000000  0.22772277
+
+AGE MODEL: null deviance 594.713750; residual deviance 580.936721; df_resid 618; AIC 584.936721
+         Estimate  Std.Error     z.value    p.value  odds.ratio
+const -4.03742894 0.71865077 -5.61806806 0.00000002  0.01764277
+age    0.10020144 0.02737703  3.66005553 0.00025216  1.10539357
+
+MULTIPLE MODEL: null deviance 594.713750; residual deviance 547.203330; df_resid 616; AIC 555.203330
+                 Estimate  Std.Error     z.value    p.value  odds.ratio
+const         -3.49630007 1.82250490 -1.91840366 0.05505985  0.03030932
+age            0.10932731 0.02884790  3.78978348 0.00015078  1.11552741
+prev_injuries  0.52187381 0.09052948  5.76468380 0.00000001  1.68518240
+bmi           -0.05729897 0.07070148 -0.81043532 0.41769002  0.94431170
+
+Age-only profile OR CI: 1.048145, 1.167111
+Multiple profile OR CI for age: 1.054804, 1.181353
+Multiple profile OR CI for prev_injuries: 1.412463, 2.015956
+Multiple profile OR CI for bmi: 0.821725, 1.084706
+
+NESTED MODEL LRTS:
+Null -> age: ΔD=13.777028, df=1, p=0.0002058377612
+Null -> multiple: ΔD=47.510420, df=3, p=2.706738976e-10
+Drop age: ΔD=14.836308, df=1, p=0.000117256181; reduced model AIC=568.039638
+Drop prev_injuries: ΔD=33.233452, df=1, p=8.17323169e-09; reduced model AIC=586.436782
+Drop bmi: ΔD=0.657252, df=1, p=0.4175318831; reduced model AIC=553.860581
+
+Notes: Numerical p-values and inference describe simulated observational data. These are not causal estimates.
