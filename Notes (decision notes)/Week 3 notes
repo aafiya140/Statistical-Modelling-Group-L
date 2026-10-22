@@ -1,0 +1,63 @@
+## Purpose and choice of model
+
+We used R to explore which responses in the two datasets would be suitable for a generalised linear model (GLM), building on the Week 2 normal linear regression work. The aim at this stage was to establish an appropriate response distribution, explore an initial injury model and record which variables might be useful for later analysis. **This was exploratory analysis, not the final model-selection exercise.**
+
+**League players:** The dataset contains 620 players from 24 clubs. We selected `injured` as the response because it is binary (0 = not injured during the season, 1 = injured). There were **115 injured players and 505 non-injured players**, giving an observed injury proportion of **18.5%**. Since a normal linear model can give predicted values outside 0–1 and assumes constant error variance, we chose a **binomial GLM with a logit link (logistic regression)**. This models the probability of injury while keeping fitted probabilities between 0 and 1.
+
+**Ashford matches:** We identified `goals_scored` and `goals_conceded` as counts, `home_away` as categorical and `opponent_rank` as an ordered rank. A Poisson GLM with a log link is a possible starting point for goals scored because fitted expected counts must be non-negative. We **did not fit a Poisson model in Week 3**: it is a candidate for the later count-response analysis, subject to checking the fit and possible overdispersion. The Week 2 normal linear model for goals scored had an impossible negative fitted intercept, which further motivated considering a count model.
+
+## League players: initial age-only logistic regression
+
+We first fitted `glm(injured ~ age, family = binomial(link = "logit"))`. This simple model tests whether age is associated with the odds of a player being injured.
+
+- **Age coefficient:** 0.1002 (standard error 0.0274). For each additional year of age, the estimated *log-odds* of injury increase by 0.1002.
+- **Odds ratio:** `exp(0.1002) = 1.105`, so the estimated odds increase by approximately **10.5% per additional year**. The approximate profile-likelihood **95% confidence interval is 1.048–1.167**.
+- **Wald test:** z = 3.660, p = 0.000252. We reject the null hypothesis that the age coefficient is zero at the 5% significance level.
+- **Likelihood-ratio test (LRT):** The deviance decreases from **594.714** for the intercept-only model to **580.937** after adding age. This gives a change in deviance of **13.777 on 1 degree of freedom** (p = 0.000206). This independently supports including age rather than using only an intercept.
+
+The Wald and LRT p-values are slightly different because they are different tests; both provide evidence of an age association. The odds ratio is **not** a 10.5-percentage-point increase in injury probability, nor does the observational association establish that age causes injury.
+
+## League players: exploratory multiple-predictor model
+
+We then fitted `glm(injured ~ age + prev_injuries + bmi, family = binomial(link = "logit"))` to assess the predictors together. We chose previous injuries because they could plausibly be associated with current-season injuries, and BMI as another candidate player characteristic. Including all three enabled us to distinguish the age-only association from the association after adjusting for previous injuries and BMI.
+
+| Predictor | Coefficient | Adjusted odds ratio | Approx. 95% CI for odds ratio | Wald p-value |
+|---|---:|---:|---:|---:|
+| Age (per year) | 0.1093 | 1.116 | 1.055–1.181 | 0.000151 |
+| Previous injuries (per injury) | 0.5219 | 1.685 | 1.412–2.016 | < 0.000001 |
+| BMI (per unit) | −0.0573 | 0.944 | 0.822–1.085 | 0.418 |
+
+**Interpretation:** After controlling for the other two predictors, the estimated injury odds increase by approximately **11.6% per additional year of age** and **68.5% per additional previous injury**. Both predictors are statistically significant. BMI has an estimated odds ratio below 1, but its confidence interval includes 1 and its p-value is greater than 0.05. We therefore **do not have sufficient evidence that BMI is associated with injury once age and injury history are included**; we cannot conclude that BMI is independent of injury.
+
+### Deviance and likelihood-ratio comparisons
+
+The three-predictor model has a residual deviance of **547.203** compared with the intercept-only deviance of **594.714**. The difference is **47.510 on 3 degrees of freedom** (LRT p ≈ 2.71 × 10⁻¹⁰), indicating a substantially better fit than an intercept-only model. This does not by itself establish that the model is correctly specified or is the best possible model.
+
+We used `drop1(..., test = "Chisq")` to compare the three-predictor model with three reduced models, each removing one predictor while retaining the others:
+
+| Predictor removed | Increase in deviance (1 df) | LRT p-value | Decision at 5% |
+|---|---:|---:|---|
+| Age | 14.836 | 0.000117 | Retain as an important candidate |
+| Previous injuries | 33.233 | < 0.000001 | Retain as an important candidate |
+| BMI | 0.657 | 0.418 | No evidence of added contribution |
+
+These results agree with the individual coefficient tests. In particular, previous injuries provide additional information even after adjusting for age and BMI. The lack of a significant BMI contribution motivates reconsidering BMI in Week 4; we did not designate the three-predictor Week 3 model as final.
+
+## Decisions and next steps
+
+| Decision | Reason and alternative considered |
+|---|---|
+| Model `injured` with binomial logistic regression, rather than ordinary linear regression | The response has only two possible values and requires fitted probabilities in the interval 0–1. |
+| Start with `age` alone, then explore `age + prev_injuries + bmi` | This provides a clear single-predictor example before examining adjusted effects; the additional predictors were plausible candidates, not assumed to be necessary. |
+| Use both Wald tests and likelihood-ratio tests | The Wald test examines a coefficient relative to its standard error; the LRT compares nested models through changes in deviance. The results can differ slightly. |
+| Treat BMI as a weak candidate, rather than declaring it influential | Its confidence interval contains an odds ratio of 1 and its partial LRT p-value is 0.418. Formal simplification was carried forward to Week 4. |
+| Leave the goals-scored Poisson model for a later week | Week 3 was concerned with recognising the outcome type; adequacy of a Poisson variance assumption requires a separate fit and diagnostic checks. |
+| Keep the script portable | We removed the personal Windows `setwd()` location and use project-relative paths to the CSV files. No model formula or testing method needed correcting. |
+
+**Limitations:** The data are simulated, so findings concern this fictional league. The logistic results describe *associations in injury odds*, not causal effects or changes in probability. Players are clustered within clubs, so the assumption of independent player observations may be imperfect and can be revisited when group-level models are covered. We also have not completed the model-diagnostic or predictor-selection stages in Week 3. These will be considered in later weeks.
+
+## Conclusion
+
+The exploratory Week 3 analysis supports **age and previous injury history as useful candidate predictors** of injury, while providing little evidence of an additional BMI association in the three-predictor model. Both the coefficient tests and likelihood-ratio comparisons support this conclusion. The analysis established why a binomial GLM is appropriate and provided a starting point for **Week 4**, where the group investigated the predictor set further (including training load and playing minutes) before selecting a more parsimonious model.
+
+*Reproducibility:* The corresponding script is `code/Week 3.R`. Run it from the shared project root, with the supplied CSV files either in the root or in `data/`. It retains the original exploratory tests. Numerical values were independently checked using an equivalent binomial GLM fit; the R script itself should be run in RStudio after the files are added to the group's repository.
