@@ -1,0 +1,132 @@
+
+# Week 5 - League Players: Injury Model Diagnostics
+# Module: MTH6134 Statistical Modelling II
+# Aim: Fit a logistic regression model and check its diagnostics
+
+# --------------------------------------------------
+# 1. Load the data
+# --------------------------------------------------
+
+# Change this path if your CSV is stored in a different folder
+players <- read.csv(
+  "MTH6134-Group Project/league_players.csv"
+)
+
+# Check the dataset
+dim(players)
+names(players)
+
+# Check the number and proportion of injured players
+table(players$injured)
+prop.table(table(players$injured))
+
+
+# --------------------------------------------------
+# 2. Fit the logistic regression model
+# --------------------------------------------------
+
+injury_model <- glm(
+  injured ~ age + training_load +
+    prev_injuries + bmi + minutes_played,
+  data = players,
+  family = binomial(link = "logit")
+)
+
+# Display the model results
+summary(injury_model)
+
+# Calculate odds ratios
+exp(coef(injury_model))
+
+# Check whether the model converged
+injury_model$converged
+
+
+# --------------------------------------------------
+# 3. Check Pearson dispersion
+# --------------------------------------------------
+
+pearson_dispersion <-
+  sum(residuals(injury_model, type = "pearson")^2) /
+  df.residual(injury_model)
+
+pearson_dispersion
+
+
+# --------------------------------------------------
+# 4. Save the four diagnostic plots
+# --------------------------------------------------
+
+# Save the plots as a PDF
+pdf("injury_diagnostics.pdf", width = 10, height = 8)
+
+# Arrange plots in a 2 by 2 layout
+par(mfrow = c(2, 2))
+
+# Produce the four diagnostic plots
+plot(injury_model)
+
+# Close the PDF device
+dev.off()
+
+# Reset the plot layout
+par(mfrow = c(1, 1))
+
+
+# --------------------------------------------------
+# 5. Calculate and plot Cook's distance
+# --------------------------------------------------
+
+# Calculate Cook's distance for each player
+cooks <- cooks.distance(injury_model)
+
+# Display the five largest Cook's distances
+head(sort(cooks, decreasing = TRUE), 5)
+
+# Save the Cook's distance plot as a PDF
+pdf("cooks_distance.pdf", width = 8, height = 6)
+
+plot(
+  cooks,
+  type = "h",
+  main = "Cook's Distance for Injury GLM",
+  xlab = "Observation",
+  ylab = "Cook's distance"
+)
+
+dev.off()
+
+
+# --------------------------------------------------
+# 6. Identify potentially influential observations
+# --------------------------------------------------
+
+# Use 4/n as a screening threshold
+influential_ids <- which(cooks > 4 / nrow(players))
+
+# Display the number of observations flagged
+length(influential_ids)
+
+# Display the flagged observations
+influential_ids
+
+# View the five observations with the largest Cook's distances
+top_ids <- as.integer(
+  names(head(sort(cooks, decreasing = TRUE), 5))
+)
+
+players[top_ids, ]
+
+
+# --------------------------------------------------
+# 7. Check the output
+# --------------------------------------------------
+
+# Show the model coefficients
+coef(injury_model)
+
+# Show where the PDF files were saved
+getwd()
+
+# List files in the current working directory
+list.files()
