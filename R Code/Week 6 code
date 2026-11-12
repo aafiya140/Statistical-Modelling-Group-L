@@ -1,0 +1,297 @@
+# 1. Read and check the data -----------------------------------------------
+data_candidates <- c("ashford_matches.csv", "data/ashford_matches.csv",
+                     "../ashford_matches.csv", "../data/ashford_matches.csv")
+data_file <- data_candidates[file.exists(data_candidates)][1]
+if (is.na(data_file)) {
+  if (interactive()) {
+    data_file <- file.choose()
+  } else {
+    stop("Cannot find ashford_matches.csv. Run from the project root or code/.")
+  }
+}
+data_file <- normalizePath(data_file, winslash = "/", mustWork = TRUE)
+project_dir <- dirname(data_file)
+if (basename(project_dir) == "data") project_dir <- dirname(project_dir)
+output_dir <- file.path(project_dir, "outputs")
+dir.create(output_dir, recursive = TRUE, showWarnings = FALSE)
+
+matches <- read.csv(data_file, stringsAsFactors = FALSE)
+needed <- c("home_away", "goals_scored", "goals_conceded", "opponent_rank")
+stopifnot(all(needed %in% names(matches)), nrow(matches) > 5,
+          !anyNA(matches[needed]),
+          all(matches$home_away %in% c("Away", "Home")),
+          all(c("Away", "Home") %in% matches$home_away))
+for (variable in c("goals_scored", "goals_conceded", "opponent_rank")) {
+  stopifnot(is.numeric(matches[[variable]]),
+            all(is.finite(matches[[variable]])),
+            all(matches[[variable]] == floor(matches[[variable]])))
+}
+stopifnot(all(matches$goals_scored >= 0), all(matches$goals_conceded >= 0),
+          all(matches$opponent_rank >= 1 & matches$opponent_rank <= 24))
+matches$home_away <- factor(matches$home_away, levels = c("Away", "Home"))
+matches$rank_c <- matches$opponent_rank - 10
+matches$row_id <- seq_len(nrow(matches))  # CSV row, NOT chronological match order
+
+# Centre rank at 10 so the intercept describes an away match against rank 10.
+# One match is the exposure unit. No varying-duration offset is available.
+# A constant offset(log(1)) is zero and would not change the fitted model.
+
+log_file <- file.path(output_dir, "week6_R_console_output.txt")
+sink(log_file, split = TRUE)
+tryCatch({
+options(width = 110, digits = 6)
+cat("WEEK 6: ASHFORD MATCHES - POISSON REGRESSION\n\n")
+print(head(matches))
+print(summary(matches[needed]))
+print(table(matches$home_away))
+cat("Missing values:", sum(is.na(matches[needed])), "\n")
+cat("Goal mean:", mean(matches$goals_scored),
+    " Unconditional variance:", var(matches$goals_scored), "\n")
+print(aggregate(goals_scored ~ home_away, matches,
+                function(y) c(n = length(y), total = sum(y), mean = mean(y))))
+cat("Zero-goal matches:", sum(matches$goals_scored == 0), "\n")
+cat("Matches per venue and opponent rank:\n")
+print(table(matches$home_away, matches$opponent_rank))
+
+# 2. Compare the log and square-root links ---------------------------------
+# Reuse the Week 2 predictors, but model goals as Poisson counts.
+# Goals conceded is a contemporaneous outcome, so this is an exploratory
+# association model, not a validated pre-match prediction model.
+model_log <- glm(goals_scored ~ home_away + rank_c + goals_conceded,
+                 family = poisson(link = "log"), data = matches)
+model_sqrt <- glm(goals_scored ~ home_away + rank_c + goals_conceded,
+                  family = poisson(link = "sqrt"), data = matches)
+stopifnot(model_log$converged, model_sqrt$converged,
+          all(predict(model_sqrt, type = "link") > 0))
+cat("\nINITIAL LOG-LINK MODEL\n")
+print(summary(model_log))
+cat("\nINITIAL SQUARE-ROOT-LINK MODEL\n")
+print(summary(model_sqrt))
+link_comparison <- data.frame(
+  link = c("Log", "Square root"),
+  residual_deviance = c(deviance(model_log), deviance(model_sqrt)),
+  residual_df = c(df.residual(model_log), df.residual(model_sqrt)),
+  AIC = c(AIC(model_log), AIC(model_sqrt)))
+print(link_comparison)
+# These links are not nested: compare AIC and plots, not a chi-square LRT.
+# sqrt(mu) = eta requires eta >= 0; its coefficients are NOT log rate ratios.
+
+# 3. Nested-model comparisons and model simplification ---------------------
+# Check whether the rank slope differs between home and away matches.
+model_interaction <- update(model_log, . ~ . + home_away:rank_c)
+cat("\nCHECK THE HOME-BY-RANK INTERACTION\n")
+print(drop1(model_interaction, test = "Chisq"))
+print(anova(model_log, model_interaction, test = "Chisq"))
+# The interaction is not supported in these data; retain additive effects.
+cat("\nCHECK THE ADDITIVE PREDICTORS\n")
+print(drop1(model_log, test = "Chisq"))
+model_final <- update(model_log, . ~ . - goals_conceded)
+print(anova(model_final, model_log, test = "Chisq"))
+cat("\nSELECTED LOG-LINK MODEL\n")
+print(summary(model_final))
+print(drop1(model_final, test = "Chisq"))
+model_null <- update(model_final, . ~ 1)
+print(anova(model_null, model_final, test = "Chisq"))
+# These choices reproduce this dataset's decisions, not an automatic rule
+# for different data. A non-significant test does not prove no association.
+
+model_comparison <- data.frame(
+  model = c("Intercept only", "Log: all additive predictors",
+            "Sqrt: all additive predictors", "Log: add home-by-rank interaction",
+            "Log: home + rank (selected)"),
+  parameters = c(model_null$rank, model_log$rank, model_sqrt$rank,
+                 model_interaction$rank, model_final$rank),
+  deviance = c(deviance(model_null), deviance(model_log), deviance(model_sqrt),
+               deviance(model_interaction), deviance(model_final)),
+  residual_df = c(df.residual(model_null), df.residual(model_log),
+                  df.residual(model_sqrt), df.residual(model_interaction),
+                  df.residual(model_final)),
+  AIC = c(AIC(model_null), AIC(model_log), AIC(model_sqrt),
+          AIC(model_interaction), AIC(model_final)))
+print(model_comparison, row.names = FALSE)
+
+# 4. Interpret expected-goal ratios and calculate fitted means -------------
+coefficient_table <- coef(summary(model_final))
+wald_ci <- confint.default(model_final, level = 0.95)
+effect_table <- data.frame(
+  term = names(coef(model_final)), estimate = coef(model_final),
+  SE = coefficient_table[, "Std. Error"],
+  exp_estimate = exp(coef(model_final)),
+  lower_95 = exp(wald_ci[, 1]), upper_95 = exp(wald_ci[, 2]),
+  Wald_p = coefficient_table[, "Pr(>|z|)"])
+cat("\nCOEFFICIENTS AND 95% WALD INTERVALS\n")
+print(effect_table, row.names = FALSE)
+# exp(intercept) is expected goals away against rank 10, not a ratio.
+# exp(home coefficient) is Home/Away at the same opponent rank.
+# exp(rank coefficient) is the ratio for one numerically larger rank.
+
+prediction_examples <- expand.grid(
+  opponent_rank = c(1, 10, 24),
+  home_away = factor(c("Away", "Home"), levels = c("Away", "Home")))
+prediction_examples$rank_c <- prediction_examples$opponent_rank - 10
+pred <- predict(model_final, newdata = prediction_examples,
+                type = "link", se.fit = TRUE)
+prediction_examples$expected_goals <- exp(pred$fit)
+prediction_examples$lower_95 <- exp(pred$fit - qnorm(0.975) * pred$se.fit)
+prediction_examples$upper_95 <- exp(pred$fit + qnorm(0.975) * pred$se.fit)
+print(prediction_examples, row.names = FALSE)
+# These are confidence intervals for the mean, not individual-match intervals.
+
+# 5. Goodness of fit, dispersion and influence -----------------------------
+n <- nrow(matches)
+p <- model_final$rank
+mu <- fitted(model_final)
+standardised_deviance <- rstandard(model_final, type = "deviance")
+pearson_statistic <- sum(residuals(model_final, type = "pearson")^2)
+dispersion <- pearson_statistic / df.residual(model_final)
+gof_p <- pchisq(deviance(model_final), df.residual(model_final), lower.tail = FALSE)
+cat("\nFIT CHECKS\n")
+cat("Residual deviance =", deviance(model_final), "on",
+    df.residual(model_final), "df; approximate GOF p =", gof_p, "\n")
+cat("Pearson statistic =", pearson_statistic,
+    "; Pearson dispersion estimate =", dispersion, "\n")
+cat("Fitted-mean range:", range(mu), "\n")
+cat("Observed zero counts:", sum(matches$goals_scored == 0),
+    "; sum of fitted zero probabilities:", sum(dpois(0, mu)), "\n")
+# Poisson fixes dispersion to 1 in summary(); that is NOT a test result.
+# Low fitted counts make the chi-square GOF approximation imperfect.
+# A QQ plot is descriptive: a Poisson response need not have normal errors.
+
+diagnostics <- data.frame(matches[needed], row_id = matches$row_id,
+                          fitted = mu,
+                          std_deviance = standardised_deviance,
+                          leverage = hatvalues(model_final),
+                          cooks_distance = cooks.distance(model_final))
+cat("Cook reference 4/n =", 4/n, "; leverage reference 2p/n =", 2*p/n, "\n")
+print(diagnostics[order(diagnostics$cooks_distance, decreasing = TRUE), ],
+      row.names = FALSE)
+
+# 6. Refit after omitting each of the three largest Cook's-distance rows ----
+# This is a sensitivity check; the selected main model keeps every match.
+influential_rows <- head(order(diagnostics$cooks_distance, decreasing = TRUE), 3)
+omission_models <- lapply(influential_rows, function(i) {
+  update(model_final, data = matches[-i, ])
+})
+names(omission_models) <- paste0("Omit row ", influential_rows)
+sensitivity_models <- c(list("All 46 matches" = model_final), omission_models)
+sensitivity <- do.call(rbind, lapply(names(sensitivity_models), function(label) {
+  fit <- sensitivity_models[[label]]
+  b <- coef(fit); se <- sqrt(diag(vcov(fit)))
+  tests <- drop1(fit, test = "Chisq")
+  data.frame(analysis = label, n = nobs(fit),
+    home_ratio = exp(b["home_awayHome"]),
+    home_lower = exp(b["home_awayHome"] - qnorm(0.975)*se["home_awayHome"]),
+    home_upper = exp(b["home_awayHome"] + qnorm(0.975)*se["home_awayHome"]),
+    home_LRT_p = tests["home_away", "Pr(>Chi)"],
+    rank_ratio = exp(b["rank_c"]),
+    rank_lower = exp(b["rank_c"] - qnorm(0.975)*se["rank_c"]),
+    rank_upper = exp(b["rank_c"] + qnorm(0.975)*se["rank_c"]),
+    rank_LRT_p = tests["rank_c", "Pr(>Chi)"], row.names = NULL)
+}))
+cat("\nINFLUENCE SENSITIVITY (95% WALD INTERVALS; LRT P-VALUES)\n")
+print(sensitivity, row.names = FALSE)
+
+# 7. Save plots -----------------------------------------------------------
+away_colour <- "#315B86"
+home_colour <- "#158276"
+png(file.path(output_dir, "week6_link_comparison.png"),
+    width = 1650, height = 760, res = 150)
+par(mfrow = c(1, 2), mar = c(5, 4.5, 3, 1))
+for (link_name in c("Log", "Square root")) {
+  fit <- if (link_name == "Log") model_log else model_sqrt
+  plot(matches$row_id, matches$goals_scored, pch = 16, col = "#404040",
+       xlab = "CSV row (home 1-23; away 24-46)", ylab = "Goals scored",
+       ylim = c(0, max(matches$goals_scored) + 0.5), main = paste(link_name, "link"))
+  points(matches$row_id, fitted(fit), pch = 1, col = home_colour, cex = 1.15, lwd = 2)
+  abline(v = 23.5, lty = 3, col = "grey70")
+  text(8, matches$goals_scored[8], "  Row 8", pos = 4, cex = 0.8)
+  legend("topright", c("Observed", "Fitted mean"), pch = c(16, 1),
+         col = c("#404040", home_colour), bty = "n", cex = 0.85)
+}
+dev.off()
+
+png(file.path(output_dir, "week6_goal_predictions.png"),
+    width = 1500, height = 850, res = 150)
+par(mar = c(4.5, 4.5, 3, 1))
+plot(NA, xlim = c(1, 24), ylim = c(0, max(matches$goals_scored) + 0.5),
+     xlab = "Opponent's final rank (larger = lower league position)",
+     ylab = "Goals per match", main = "Selected Poisson model: fitted mean and 95% CI")
+for (venue in c("Away", "Home")) {
+  colour <- if (venue == "Home") home_colour else away_colour
+  grid <- data.frame(opponent_rank = seq(1, 24, length.out = 150),
+                     home_away = factor(venue, levels = levels(matches$home_away)))
+  grid$rank_c <- grid$opponent_rank - 10
+  prediction <- predict(model_final, newdata = grid, type = "link", se.fit = TRUE)
+  lower <- exp(prediction$fit - qnorm(0.975) * prediction$se.fit)
+  upper <- exp(prediction$fit + qnorm(0.975) * prediction$se.fit)
+  polygon(c(grid$opponent_rank, rev(grid$opponent_rank)), c(lower, rev(upper)),
+          col = adjustcolor(colour, alpha.f = 0.12), border = NA)
+  lines(grid$opponent_rank, exp(prediction$fit), col = colour, lwd = 2.5)
+  rows <- matches$home_away == venue
+  points(matches$opponent_rank[rows], matches$goals_scored[rows],
+         col = colour, pch = if (venue == "Home") 16 else 1, cex = 0.85)
+}
+legend("topleft", c("Home", "Away"), col = c(home_colour, away_colour),
+       pch = c(16, 1), lwd = 2, bty = "n")
+text(24, 8, "Row 8: 8 goals", pos = 2, cex = 0.8)
+dev.off()
+
+png(file.path(output_dir, "week6_diagnostics.png"),
+    width = 1500, height = 1200, res = 150)
+par(mfrow = c(2, 2), mar = c(4.5, 4.5, 3, 1))
+plot(mu, standardised_deviance, pch = 16, col = away_colour,
+     xlab = "Fitted mean", ylab = "Standardised deviance residual",
+     ylim = range(standardised_deviance) + c(-0.2, 0.45),
+     main = "Residuals versus fitted")
+abline(h = 0, lty = 2, col = "grey40")
+lines(lowess(mu, standardised_deviance), col = home_colour, lwd = 2)
+text(mu[influential_rows], standardised_deviance[influential_rows],
+     labels = influential_rows, pos = 3, cex = 0.75)
+qqnorm(standardised_deviance, pch = 16, col = away_colour,
+       main = "QQ plot (descriptive only)")
+qqline(standardised_deviance, col = home_colour, lwd = 2)
+plot(matches$row_id, diagnostics$cooks_distance, type = "h", lwd = 2,
+     col = away_colour, xlab = "CSV row", ylab = "Cook's distance",
+     ylim = c(0, max(diagnostics$cooks_distance)*1.2), main = "Influence")
+abline(h = 4/n, lty = 2, col = home_colour)
+text(influential_rows, diagnostics$cooks_distance[influential_rows],
+     labels = influential_rows, pos = 3, cex = 0.8)
+plot(diagnostics$leverage, standardised_deviance, pch = 16,
+     col = away_colour, xlab = "Leverage", ylab = "Standardised deviance residual",
+     ylim = range(standardised_deviance) + c(-0.2, 0.45),
+     main = "Residuals versus leverage")
+abline(h = c(-2, 0, 2), lty = 2, col = "grey65")
+abline(v = 2*p/n, lty = 2, col = home_colour)
+text(diagnostics$leverage[influential_rows], standardised_deviance[influential_rows],
+     labels = influential_rows, pos = 3, cex = 0.75)
+dev.off()
+
+png(file.path(output_dir, "week6_sensitivity.png"),
+    width = 1500, height = 700, res = 150)
+par(mfrow = c(1, 2), mar = c(4.5, 8.5, 3, 1))
+for (variable in c("home", "rank")) {
+  estimate <- sensitivity[[paste0(variable, "_ratio")]]
+  lower <- sensitivity[[paste0(variable, "_lower")]]
+  upper <- sensitivity[[paste0(variable, "_upper")]]
+  rows <- rev(seq_len(nrow(sensitivity)))
+  plot(estimate, rows, xlim = range(c(1, lower, upper)),
+       ylim = c(0.5, nrow(sensitivity)+0.5), yaxt = "n", ylab = "",
+       xlab = "Expected-goal ratio (95% Wald CI)", pch = 16, col = away_colour,
+       main = if (variable == "home") "Home versus away" else "One rank place larger")
+  axis(2, at = rows, labels = sensitivity$analysis, las = 1, cex.axis = 0.8)
+  segments(lower, rows, upper, rows, col = away_colour, lwd = 2)
+  abline(v = 1, lty = 2, col = home_colour)
+}
+dev.off()
+
+# Save numeric tables alongside the complete console output.
+write.csv(model_comparison, file.path(output_dir, "week6_model_comparison.csv"), row.names = FALSE)
+write.csv(effect_table, file.path(output_dir, "week6_coefficients.csv"), row.names = FALSE)
+write.csv(prediction_examples, file.path(output_dir, "week6_predictions.csv"), row.names = FALSE)
+write.csv(diagnostics, file.path(output_dir, "week6_match_diagnostics.csv"), row.names = FALSE)
+write.csv(sensitivity, file.path(output_dir, "week6_sensitivity.csv"), row.names = FALSE)
+cat("\nSESSION INFORMATION\n")
+print(sessionInfo())
+cat("\nAnalysis complete. The main model retains all matches.\n")
+}, finally = sink())
+cat("Week 6 output saved in:", output_dir, "\n")
