@@ -1,6 +1,5 @@
 # 1. Read and check the data -----------------------------------------------
-data_candidates <- c("ashford_matches.csv", "data/ashford_matches.csv",
-                     "../ashford_matches.csv", "../data/ashford_matches.csv")
+setwd("C:/Users/Admin/OneDrive - Queen Mary, University of London/Stats modelling/Group Project/Files")
 data_file <- data_candidates[file.exists(data_candidates)][1]
 if (is.na(data_file)) {
   if (interactive()) {
@@ -9,6 +8,7 @@ if (is.na(data_file)) {
     stop("Cannot find ashford_matches.csv. Run from the project root or code/.")
   }
 }
+ashford_matches <- read.csv("ashford_matches.csv", header = T)
 data_file <- normalizePath(data_file, winslash = "/", mustWork = TRUE)
 project_dir <- dirname(data_file)
 if (basename(project_dir) == "data") project_dir <- dirname(project_dir)
